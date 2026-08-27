@@ -93,7 +93,6 @@ ANALYST FEEDBACK → RE-RANKING MODEL
 - [x] Alembic migration versions and Docker Compose setup
 - [x] Automated test suite verifying models, agents, health checks, and database connections
 
-### ⏳ Future Phases (Planned Roadmap — Do Not Implement Yet)
 - **Phase 1**: Ingestion & Graph Foundation (GDELT GKG, RSS feeds, entity graph)
 - **Phase 2**: Understanding (Multilingual embeddings + HDBSCAN clustering)
 - **Phase 3**: Core Differentiators (Independence scoring, 6D Story Formation Score, Contradiction Gate)
