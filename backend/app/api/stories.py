@@ -214,19 +214,19 @@ async def get_emerging_stories_feed(
     # 1. Fetch raw alerts
     alerts_query = select(Alert)
 
-    if contradiction_status:
-        alerts_query = alerts_query.where(Alert.contradiction_status == contradiction_status.upper())
+    if isinstance(contradiction_status, str) and contradiction_status.strip():
+        alerts_query = alerts_query.where(Alert.contradiction_status == contradiction_status.strip().upper())
 
-    if min_formation_score is not None:
+    if isinstance(min_formation_score, (int, float)):
         alerts_query = alerts_query.where(Alert.formation_score >= min_formation_score)
 
-    if min_probability is not None:
+    if isinstance(min_probability, (int, float)):
         alerts_query = alerts_query.where(Alert.probability >= min_probability)
 
-    if min_impact is not None:
+    if isinstance(min_impact, (int, float)):
         alerts_query = alerts_query.where(Alert.impact >= min_impact)
 
-    if min_urgency is not None:
+    if isinstance(min_urgency, (int, float)):
         alerts_query = alerts_query.where(Alert.urgency >= min_urgency)
 
     if evidence_only is True:
@@ -256,7 +256,7 @@ async def get_emerging_stories_feed(
     output: List[AlertItemDetail] = []
     for a in alerts:
         # Search text match filter
-        if search:
+        if isinstance(search, str) and search.strip():
             s_low = search.strip().lower()
             text_match = (
                 s_low in (a.title or "").lower() or
@@ -267,7 +267,7 @@ async def get_emerging_stories_feed(
             if not text_match:
                 continue
 
-        if language and language.lower() not in [l.lower() for l in (a.languages or [])]:
+        if isinstance(language, str) and language.strip() and language.lower() not in [l.lower() for l in (a.languages or [])]:
             continue
 
         output.append(

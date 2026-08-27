@@ -23,7 +23,12 @@ class Settings(BaseSettings):
 
     # Ingestion Configuration
     GDELT_API_URL: str = "https://api.gdeltproject.org/api/v2/gkg/gkg"
+    GDELT_DOC_API_URL: str = "http://api.gdeltproject.org/api/v2/doc/doc"
     GDELT_ENABLED: bool = True
+    GDELT_DEFAULT_QUERY: str = "(technology OR energy OR regulatory OR industry OR climate OR health OR business OR economy OR policy)"
+    GDELT_TIMESPAN: str = "60min"
+    GDELT_MAX_RECORDS: int = 30
+    RSS_INGESTION_ENABLED: bool = True
     NEWS_API_KEY: Optional[str] = None
     NEWS_API_BASE_URL: str = "https://newsapi.org/v2"
 

@@ -50,7 +50,14 @@ export default function IntelligenceFeedPage() {
   const [alerts, setAlerts] = useState<AlertFeedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [pipelineRunning, setPipelineRunning] = useState(false);
+  const [pipelinePhase, setPipelinePhase] = useState<string>("");
   const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
+  const [ingestStatus, setIngestStatus] = useState<{
+    is_live_signal?: boolean;
+    last_successful_ingestion?: string | null;
+    current_status?: string;
+    total_articles_count?: number;
+  } | null>(null);
 
   // Search & Filter States
   const [searchQuery, setSearchQuery] = useState("");
@@ -59,6 +66,18 @@ export default function IntelligenceFeedPage() {
   const [selectedContradictionStatus, setSelectedContradictionStatus] = useState<string>("ALL");
   const [sortBy, setSortBy] = useState<string>("ranking_score");
   const [showFilters, setShowFilters] = useState(false);
+
+  const fetchIngestStatus = async () => {
+    try {
+      const res = await fetch("http://localhost:8000/api/v1/ingest/status");
+      if (res.ok) {
+        const data = await res.json();
+        setIngestStatus(data);
+      }
+    } catch (e) {
+      console.debug("Status fetch note:", e);
+    }
+  };
 
   const fetchEmergingFeed = async () => {
     setLoading(true);
@@ -76,15 +95,19 @@ export default function IntelligenceFeedPage() {
         const data = await res.json();
         setAlerts(data);
       } else {
-        setAlerts(getFallbackFeed());
+        setAlerts([]);
       }
     } catch (err) {
-      console.warn("Using demo feed data:", err);
-      setAlerts(getFallbackFeed());
+      console.warn("Feed fetch note:", err);
+      setAlerts([]);
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchIngestStatus();
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -93,15 +116,29 @@ export default function IntelligenceFeedPage() {
     return () => clearTimeout(timer);
   }, [searchQuery, minFormationScore, selectedLanguage, selectedContradictionStatus, sortBy]);
 
-  const runPhase4Pipeline = async () => {
+  const runFullIntelligencePipeline = async () => {
     setPipelineRunning(true);
+    setPipelinePhase("Ingesting Live GDELT & RSS News...");
     try {
-      await fetch("http://localhost:8000/api/v1/pipeline/run-phase4", { method: "POST" });
+      // 1. Call full pipeline execute endpoint
+      const res = await fetch("http://localhost:8000/api/v1/pipeline/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        // Fallback: run individual phases
+        setPipelinePhase("Running Intelligence Pipeline...");
+        await fetch("http://localhost:8000/api/v1/pipeline/run-phase2", { method: "POST" });
+        await fetch("http://localhost:8000/api/v1/pipeline/run-phase3", { method: "POST" });
+        await fetch("http://localhost:8000/api/v1/pipeline/run-phase4", { method: "POST" });
+      }
       await fetchEmergingFeed();
+      await fetchIngestStatus();
     } catch (err) {
       console.error("Pipeline run error:", err);
     } finally {
       setPipelineRunning(false);
+      setPipelinePhase("");
     }
   };
 
@@ -132,26 +169,40 @@ export default function IntelligenceFeedPage() {
       {/* Top Hero Banner */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-slate-800">
         <div className="space-y-2">
-          <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-cyan-500/10 text-cyan-400 text-xs font-mono border border-cyan-500/20">
-            <Radio className="w-3.5 h-3.5 animate-pulse" />
-            RANKED INTELLIGENCE STREAM (AGENT 9 ORCHESTRATION)
-          </div>
+          {ingestStatus?.is_live_signal ? (
+            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-400 text-xs font-mono border border-emerald-500/30">
+              <Radio className="w-3.5 h-3.5 animate-pulse text-emerald-400" />
+              LIVE MEDIA SIGNAL &bull; Last Ingested:{" "}
+              {ingestStatus.last_successful_ingestion
+                ? new Date(ingestStatus.last_successful_ingestion).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                  })
+                : "Active"}
+            </div>
+          ) : (
+            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-cyan-500/10 text-cyan-400 text-xs font-mono border border-cyan-500/20">
+              <Radio className="w-3.5 h-3.5 animate-pulse" />
+              RANKED INTELLIGENCE STREAM (AGENT 9 ORCHESTRATION)
+            </div>
+          )}
           <h1 className="text-3xl font-bold tracking-tight text-white">
             Pre-Headline Intelligence Feed
           </h1>
           <p className="text-sm text-slate-400 max-w-2xl">
-            Ranked by <strong className="text-slate-300">Urgency × Probability × Impact</strong>. We don&apos;t just detect a story is emerging — we prove it, before it&apos;s obvious, in the language it&apos;s actually forming in.
+            Ranked by <strong className="text-slate-300">Urgency &times; Probability &times; Impact</strong>. We don&apos;t just detect a story is emerging &mdash; we prove it, before it&apos;s obvious, in the language it&apos;s actually forming in.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           <button
-            onClick={runPhase4Pipeline}
+            onClick={runFullIntelligencePipeline}
             disabled={pipelineRunning}
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-semibold shadow-lg shadow-cyan-500/20 transition-all disabled:opacity-50"
           >
             <Play className={`w-3.5 h-3.5 ${pipelineRunning ? "animate-spin" : ""}`} />
-            {pipelineRunning ? "Evaluating Stories..." : "Execute Intelligence Pipeline"}
+            {pipelineRunning ? (pipelinePhase || "Processing Pipeline...") : "Execute Intelligence Pipeline"}
           </button>
         </div>
       </div>

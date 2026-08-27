@@ -36,8 +36,8 @@ class ClusterOutputData:
 
 class StoryClusteringService:
     """
-    Agent 4 — HDBSCAN Semantic Story Clustering Engine.
-    Groups multilingual articles into candidate Story clusters while tolerating noise/outliers.
+    Agent 4 — Semantic Story Clustering Engine.
+    Groups multilingual articles into candidate Story clusters using HDBSCAN and semantic vector similarity.
     """
 
     MIN_CLUSTER_SIZE: int = 2
@@ -54,7 +54,8 @@ class StoryClusteringService:
         Executes HDBSCAN on dense embeddings.
         Returns (labels, probabilities). Noise points receive label -1.
         """
-        if len(embeddings) < (min_cluster_size or cls.MIN_CLUSTER_SIZE):
+        req_size = min_cluster_size if min_cluster_size is not None else cls.MIN_CLUSTER_SIZE
+        if len(embeddings) < req_size:
             return np.array([-1] * len(embeddings)), np.array([0.0] * len(embeddings))
 
         X = np.array(embeddings, dtype=np.float32)
@@ -62,7 +63,7 @@ class StoryClusteringService:
         try:
             import hdbscan
             clusterer = hdbscan.HDBSCAN(
-                min_cluster_size=min_cluster_size or cls.MIN_CLUSTER_SIZE,
+                min_cluster_size=req_size,
                 min_samples=min_samples or cls.MIN_SAMPLES,
                 metric="euclidean",
                 allow_single_cluster=True,
@@ -70,14 +71,14 @@ class StoryClusteringService:
             )
             clusterer.fit(X)
             
-            # If HDBSCAN marked all points as noise due to small sample size, use cosine clustering fallback
+            # If HDBSCAN marked all points as noise, fallback to cosine distance clustering
             if all(l == -1 for l in clusterer.labels_):
-                return cls._fallback_cosine_clustering(X, min_cluster_size or cls.MIN_CLUSTER_SIZE)
+                return cls._fallback_cosine_clustering(X, req_size)
             
             return clusterer.labels_, clusterer.probabilities_
         except Exception as e:
-            logger.warning(f"[ClusteringService] HDBSCAN package error, using cosine distance clustering fallback: {e}")
-            return cls._fallback_cosine_clustering(X, min_cluster_size or cls.MIN_CLUSTER_SIZE)
+            logger.warning(f"[ClusteringService] HDBSCAN package fallback to cosine distance: {e}")
+            return cls._fallback_cosine_clustering(X, req_size)
 
     @classmethod
     def _fallback_cosine_clustering(cls, X: np.ndarray, min_cluster_size: int) -> Tuple[np.ndarray, np.ndarray]:
@@ -110,9 +111,10 @@ class StoryClusteringService:
         db: AsyncSession,
         articles: List[Article],
         min_cluster_size: Optional[int] = None,
+        include_singletons: bool = False,
     ) -> List[Story]:
-        if not articles or len(articles) < (min_cluster_size or cls.MIN_CLUSTER_SIZE):
-            logger.info("[ClusteringService] Insufficient articles for clustering.")
+        if not articles:
+            logger.info("[ClusteringService] No articles available for clustering.")
             return []
 
         # 1. Ensure all articles have embeddings
@@ -131,7 +133,7 @@ class StoryClusteringService:
         # 2. Run HDBSCAN
         labels, probs = cls.run_hdbscan(embeddings, min_cluster_size=min_cluster_size)
 
-        # 3. Group by valid cluster labels (ignore -1 noise)
+        # 3. Group by valid cluster labels
         clusters_map: Dict[int, List[Article]] = {}
         noise_articles: List[Article] = []
 
@@ -141,11 +143,18 @@ class StoryClusteringService:
             else:
                 clusters_map.setdefault(int(label), []).append(articles[idx])
 
-        logger.info(f"[ClusteringService] HDBSCAN produced {len(clusters_map)} clusters; {len(noise_articles)} noise articles rejected.")
+        # If singletons are allowed, assign individual clusters to distinct noise articles
+        if include_singletons and noise_articles:
+            next_cluster_id = max(clusters_map.keys(), default=-1) + 1
+            for na in noise_articles:
+                clusters_map[next_cluster_id] = [na]
+                next_cluster_id += 1
+
+        logger.info(f"[ClusteringService] Formed {len(clusters_map)} candidate story clusters.")
 
         created_stories: List[Story] = []
 
-        # 4. Create Story records for valid clusters
+        # 4. Create Story records for clusters
         for cluster_id, cluster_articles_list in clusters_map.items():
             article_ids = [a.id for a in cluster_articles_list]
             languages = list(set(a.language for a in cluster_articles_list if a.language))
@@ -164,18 +173,21 @@ class StoryClusteringService:
                 ent_res = await db.execute(select(Entity).where(Entity.id.in_(entity_ids)))
                 entities = ent_res.scalars().all()
 
-            # Generate deterministic working title
-            primary_entity = entities[0].canonical_name if entities else "Regional Subject"
-            lead_article_title = cluster_articles_list[0].title
-            working_title = f"Emerging Narrative: {primary_entity} ({', '.join(l.upper() for l in languages)})"
-            if len(lead_article_title) < 90:
-                working_title = f"{primary_entity} Developments: {lead_article_title[:75]}"
+            # Generate descriptive working title
+            lead_article = cluster_articles_list[0]
+            lead_title = lead_article.title.strip()
+            primary_entity = entities[0].canonical_name if entities else (lead_article.attribution_text or "Intelligence Signal")
+            
+            if len(cluster_articles_list) > 1:
+                working_title = f"{primary_entity}: {lead_title[:75]}"
+            else:
+                working_title = f"{lead_title[:90]}"
 
             story_id = str(uuid.uuid4())
             story = Story(
                 id=story_id,
                 title=working_title,
-                why_it_matters=f"Candidate story cluster formed by {len(cluster_articles_list)} signals across {len(languages)} languages.",
+                why_it_matters=f"Candidate intelligence signal with {len(cluster_articles_list)} reporting sources across {len(languages)} language(s).",
                 status="EMERGING",
                 total_articles_count=len(cluster_articles_list),
                 languages=languages,

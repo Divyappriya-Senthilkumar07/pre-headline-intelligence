@@ -34,18 +34,27 @@ class IngestedArticleSummary(BaseModel):
     id: str
     title: str
     source_name: str
+    domain: Optional[str] = None
     language: str
     published_at: datetime
     excerpt: str
     url: str
+    social_image: Optional[str] = None
 
 
 class IngestionDashboardResponse(BaseModel):
-    total_media_count: int
-    recent_media: List[MediaRead] = Field(default_factory=list)
-    total_articles_count: int
-    total_sources_count: int
+    source: str = "GDELT_DOC_2.0 & RSS_FEEDS"
+    current_status: str = "ONLINE"
     rss_status: str = "ACTIVE"
     gdelt_status: str = "ACTIVE"
     last_successful_ingestion: Optional[datetime] = None
+    total_articles_count: int = 0
+    total_sources_count: int = 0
+    articles_fetched: int = 0
+    articles_accepted: int = 0
+    duplicates_skipped: int = 0
+    errors: int = 0
+    is_live_signal: bool = False
+    total_media_count: int = 0
+    recent_media: List[MediaRead] = Field(default_factory=list)
     recent_articles: List[IngestedArticleSummary] = Field(default_factory=list)
